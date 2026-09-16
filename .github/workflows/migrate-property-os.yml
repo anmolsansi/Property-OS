@@ -31,7 +31,6 @@ jobs:
           import re
 
           root = Path('/tmp/property-os-source')
-
           exact_replacements = [
               ('https://github.com/anmolsansi/IRED-PropertyOS-Monorepo', 'https://github.com/anmolsansi/Property-OS'),
               ('github.com/anmolsansi/IRED-PropertyOS-Monorepo', 'github.com/anmolsansi/Property-OS'),
@@ -62,17 +61,12 @@ jobs:
                   text = data.decode('utf-8')
               except UnicodeDecodeError:
                   continue
-
               original = text
               for old, new in exact_replacements:
                   text = text.replace(old, new)
-
-              # External identifiers need slug-safe replacements rather than prose replacements.
               text = re.sub(r'(?i)@ired\.', '@example.', text)
               text = re.sub(r'(?i)\bired-(?=[a-z0-9])', 'property-os-', text)
               text = re.sub(r'(?i)\bired_(?=[a-z0-9])', 'property_os_', text)
-
-              # Remaining standalone brand tokens. Word boundaries prevent touching words such as required/expired.
               text = re.sub(r'\bIRED\b', 'Property OS', text)
               text = re.sub(r'\bIred\b', 'Property OS', text)
               text = re.sub(r'\bired\b', 'property-os', text)
@@ -118,39 +112,39 @@ jobs:
           print('Brand-reference verification passed.')
           PY
 
-      - name: Create one commit per source file and PR snapshots
+      - name: Create one commit per non-workflow source file and PR snapshots
         shell: bash
         run: |
           set -euo pipefail
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout dev
           git reset --hard 043d6f67356e424d0a031176b4b0d95385025c7e
 
-          # Remove snapshot branches from an interrupted prior migration run, if any.
           while IFS= read -r branch; do
             [ -z "$branch" ] && continue
             git push origin --delete "$branch" || true
           done < <(git ls-remote --heads origin 'refs/heads/dev-pr-*' | awk '{sub("refs/heads/", "", $2); print $2}')
 
           cd /tmp/property-os-source
-          find . -type f -not -path './.git/*' -print0 | sort -z > /tmp/property-os-files
+          find . -type f -not -path './.git/*' \
+            -not -path './.github/workflows/*' \
+            -not -path '*/.github/workflows/*' \
+            -print0 | sort -z > /tmp/property-os-files
+          find . -type f \( -path './.github/workflows/*' -o -path '*/.github/workflows/*' \) \
+            -not -path './.git/*' -print | sort > /tmp/property-os-workflow-files
           cd "$GITHUB_WORKSPACE"
 
           count=0
           batch=1
-
           while IFS= read -r -d '' rel; do
             rel="${rel#./}"
             mkdir -p "$(dirname "$rel")"
             cp -p "/tmp/property-os-source/$rel" "$rel"
             git add -- "$rel"
-
             if ! git diff --cached --quiet; then
               git commit -m "Migrate $rel"
               count=$((count + 1))
-
               if (( count % 10 == 0 )); then
                 branch=$(printf 'dev-pr-%03d' "$batch")
                 git branch -f "$branch" HEAD
@@ -160,19 +154,21 @@ jobs:
             fi
           done < /tmp/property-os-files
 
-          if (( count % 10 != 0 )); then
-            branch=$(printf 'dev-pr-%03d' "$batch")
-            git branch -f "$branch" HEAD
-            git push --force origin "$branch:$branch"
-          fi
-
           git push --force origin dev
-
-          total_batches=$(( (count + 9) / 10 ))
+          workflow_count=$(wc -l < /tmp/property-os-workflow-files | tr -d ' ')
+          remainder=$((count % 10))
           {
             echo "## Property OS migration"
-            echo "- File commits: $count"
-            echo "- PR snapshot branches: $total_batches"
+            echo "- Non-workflow file commits: $count"
+            echo "- Completed 10-commit snapshot branches: $((count / 10))"
+            echo "- Remainder before workflow files: $remainder"
+            echo "- Workflow files reserved for connector commits: $workflow_count"
             echo "- Canonical working branch: dev"
             echo "- IRED verification: passed"
+            echo "### Reserved workflow files"
+            sed 's/^/- /' /tmp/property-os-workflow-files
           } >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/property-os-workflow-files
+          echo "NON_WORKFLOW_COMMITS=$count"
+          echo "REMAINDER=$remainder"
+          echo "WORKFLOW_FILES=$workflow_count"
