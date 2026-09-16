@@ -1,0 +1,178 @@
+name: Migrate Property OS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/migrate-property-os.yml
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out destination dev branch
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Clone source repository
+        run: git clone --depth 1 https://github.com/anmolsansi/IRED-PropertyOS-Monorepo.git /tmp/property-os-source
+
+      - name: Remove IRED branding safely
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('/tmp/property-os-source')
+
+          exact_replacements = [
+              ('https://github.com/anmolsansi/IRED-PropertyOS-Monorepo', 'https://github.com/anmolsansi/Property-OS'),
+              ('github.com/anmolsansi/IRED-PropertyOS-Monorepo', 'github.com/anmolsansi/Property-OS'),
+              ('anmolsansi/IRED-PropertyOS-Monorepo', 'anmolsansi/Property-OS'),
+              ('IRED-PropertyOS-Monorepo', 'Property-OS'),
+              ('Indian Real Estate Dimensions', 'Property OS'),
+              ('ired-propertyos-backend', 'propertyos-backend'),
+              ('ired-propertyos-frontend', 'propertyos-frontend'),
+              ('ired-propertyos-api', 'propertyos-api'),
+              ('ired-propertyos', 'propertyos'),
+              ('IRED-PropertyOS-Backend', 'PropertyOS-Backend'),
+              ('IRED-PropertyOS-Frontend', 'PropertyOS-Frontend'),
+              ('IRED-PropertyOS', 'PropertyOS'),
+              ('IRED PropertyOS', 'PropertyOS'),
+              ('IRED Property OS', 'Property OS'),
+              ('test@ired.com', 'test@example.com'),
+              ('@ired.com', '@example.com'),
+          ]
+
+          changed = []
+          for path in root.rglob('*'):
+              if not path.is_file() or '.git' in path.parts:
+                  continue
+              data = path.read_bytes()
+              if b'\x00' in data:
+                  continue
+              try:
+                  text = data.decode('utf-8')
+              except UnicodeDecodeError:
+                  continue
+
+              original = text
+              for old, new in exact_replacements:
+                  text = text.replace(old, new)
+
+              # External identifiers need slug-safe replacements rather than prose replacements.
+              text = re.sub(r'(?i)@ired\.', '@example.', text)
+              text = re.sub(r'(?i)\bired-(?=[a-z0-9])', 'property-os-', text)
+              text = re.sub(r'(?i)\bired_(?=[a-z0-9])', 'property_os_', text)
+
+              # Remaining standalone brand tokens. Word boundaries prevent touching words such as required/expired.
+              text = re.sub(r'\bIRED\b', 'Property OS', text)
+              text = re.sub(r'\bIred\b', 'Property OS', text)
+              text = re.sub(r'\bired\b', 'property-os', text)
+
+              rel = path.relative_to(root).as_posix()
+              if rel == 'Frontend/next.config.ts':
+                  text = text.replace('org: "property-os"', 'org: process.env.SENTRY_ORG || "property-os"')
+                  text = text.replace("org: 'property-os'", "org: process.env.SENTRY_ORG || 'property-os'")
+              if rel == 'Frontend/e2e/auth.setup.ts':
+                  text = text.replace('test@property-os.com', 'test@example.com')
+
+              if text != original:
+                  path.write_text(text, encoding='utf-8')
+                  changed.append(rel)
+
+          forbidden = [
+              re.compile(r'(?i)IRED-PropertyOS-Monorepo'),
+              re.compile(r'(?i)Indian\s+Real\s+Estate\s+Dimensions'),
+              re.compile(r'(?i)\bired(?=[\s._/-]|property)'),
+          ]
+          leftovers = []
+          for path in root.rglob('*'):
+              if not path.is_file() or '.git' in path.parts:
+                  continue
+              data = path.read_bytes()
+              if b'\x00' in data:
+                  continue
+              try:
+                  text = data.decode('utf-8')
+              except UnicodeDecodeError:
+                  continue
+              for pattern in forbidden:
+                  match = pattern.search(text)
+                  if match:
+                      leftovers.append(f'{path.relative_to(root)}: {match.group(0)}')
+                      break
+
+          print(f'Sanitized {len(changed)} text files.')
+          if leftovers:
+              print('Unresolved IRED references:')
+              print('\n'.join(leftovers[:100]))
+              raise SystemExit(1)
+          print('Brand-reference verification passed.')
+          PY
+
+      - name: Create one commit per source file and PR snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout dev
+          git reset --hard 043d6f67356e424d0a031176b4b0d95385025c7e
+
+          # Remove snapshot branches from an interrupted prior migration run, if any.
+          while IFS= read -r branch; do
+            [ -z "$branch" ] && continue
+            git push origin --delete "$branch" || true
+          done < <(git ls-remote --heads origin 'refs/heads/dev-pr-*' | awk '{sub("refs/heads/", "", $2); print $2}')
+
+          cd /tmp/property-os-source
+          find . -type f -not -path './.git/*' -print0 | sort -z > /tmp/property-os-files
+          cd "$GITHUB_WORKSPACE"
+
+          count=0
+          batch=1
+
+          while IFS= read -r -d '' rel; do
+            rel="${rel#./}"
+            mkdir -p "$(dirname "$rel")"
+            cp -p "/tmp/property-os-source/$rel" "$rel"
+            git add -- "$rel"
+
+            if ! git diff --cached --quiet; then
+              git commit -m "Migrate $rel"
+              count=$((count + 1))
+
+              if (( count % 10 == 0 )); then
+                branch=$(printf 'dev-pr-%03d' "$batch")
+                git branch -f "$branch" HEAD
+                git push --force origin "$branch:$branch"
+                batch=$((batch + 1))
+              fi
+            fi
+          done < /tmp/property-os-files
+
+          if (( count % 10 != 0 )); then
+            branch=$(printf 'dev-pr-%03d' "$batch")
+            git branch -f "$branch" HEAD
+            git push --force origin "$branch:$branch"
+          fi
+
+          git push --force origin dev
+
+          total_batches=$(( (count + 9) / 10 ))
+          {
+            echo "## Property OS migration"
+            echo "- File commits: $count"
+            echo "- PR snapshot branches: $total_batches"
+            echo "- Canonical working branch: dev"
+            echo "- IRED verification: passed"
+          } >> "$GITHUB_STEP_SUMMARY"
