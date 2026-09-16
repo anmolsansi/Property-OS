@@ -1,0 +1,43 @@
+name: Open Migration PRs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/open-migration-prs.yml
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  open-prs:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Open remaining migration PRs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 6 59); do
+            branch=$(printf 'dev-pr-%03d' "$i")
+            existing=$(gh pr list --repo "${{ github.repository }}" --state all --head "$branch" --json number --jq 'length')
+            if [ "$existing" != "0" ]; then
+              echo "Skipping $branch because a PR already exists"
+              continue
+            fi
+
+            if [ "$i" -eq 59 ]; then
+              body="Property OS migration batch 59 of 59. Merge strictly after PR#58. This final batch contains the last 3 one-file commits."
+            else
+              body="Property OS migration batch $i of 59. Merge PRs strictly in numeric order."
+            fi
+
+            gh pr create \
+              --repo "${{ github.repository }}" \
+              --base main \
+              --head "$branch" \
+              --title "PR#$i" \
+              --body "$body"
+          done
