@@ -5,7 +5,7 @@ services:
     plan: free
     region: singapore
     # Build from monorepo root, which contains the only workspace lockfile.
-    buildCommand: npm ci --legacy-peer-deps && npm run build:backend
+    buildCommand: npm ci --legacy-peer-deps --include=dev && npm run build:backend
     # Free web services do not support Render pre-deploy commands.
     startCommand: cd Backend && node scripts/deploy-migrations.js && npm run start:prod
     healthCheckPath: /api/v1/health
