@@ -4,10 +4,10 @@ services:
     runtime: node
     plan: free
     region: singapore
-    rootDir: Backend
-    buildCommand: npm ci --legacy-peer-deps && npx prisma generate && npm run build
-    preDeployCommand: node scripts/deploy-migrations.js
-    startCommand: npm run start:prod
+    # Build from monorepo root, which contains the only workspace lockfile.
+    buildCommand: npm ci --legacy-peer-deps --include=dev && npm run build:backend
+    # Free web services do not support Render pre-deploy commands.
+    startCommand: cd Backend && node scripts/deploy-migrations.js && npm run start:prod
     healthCheckPath: /api/v1/health
     autoDeployTrigger: commit
     envVars:
@@ -77,21 +77,7 @@ services:
         value: auto
       - key: S3_PUBLIC_URL
         sync: false
-      - key: SMTP_HOST
-        value: smtp.gmail.com
-      - key: SMTP_PORT
-        value: 587
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASS
-        sync: false
-      - key: SMTP_FROM
-        sync: false
       - key: RESEND_API_KEY
         sync: false
       - key: RESEND_FROM_EMAIL
-        sync: false
-      - key: MASTER_ADMIN_EMAIL
-        sync: false
-      - key: MASTER_ADMIN_PASSWORD
         sync: false

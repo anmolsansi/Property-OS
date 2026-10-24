@@ -91,6 +91,7 @@ describe("BuildingsService", () => {
       prisma.building.findUnique.mockResolvedValue({
         id: "b-1",
         name: "Original",
+        telecallerStatus: "VERIFIED",
         stateId: "s1",
         cityId: "c1",
       });

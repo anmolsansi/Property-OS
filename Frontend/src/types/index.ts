@@ -93,7 +93,7 @@ export interface Property {
   starRating?: number;
   facingOption?: string;
   unitAccessLocation?: string;
-  additionalFields?: any;
+  additionalFields?: Record<string, unknown> | unknown[];
   assignedWorkerId: string;
   assignedWorker?: User;
   assignedWorkerName?: string;

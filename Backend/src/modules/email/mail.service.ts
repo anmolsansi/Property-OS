@@ -70,6 +70,9 @@ export class MailService implements OnModuleInit {
     const html = this.buildOtpHtml(otp, purpose);
 
     if (!this.isConfigured) {
+      if (this.config.get<string>("app.env") === "production" || process.env.NODE_ENV === "production") {
+        throw new InternalServerErrorException("Email delivery is unavailable");
+      }
       this.logger.log(`[DEV MODE] OTP for ${to} (${purpose}): ${otp}`);
       return;
     }
@@ -89,6 +92,9 @@ export class MailService implements OnModuleInit {
     html: string;
   }): Promise<void> {
     if (!this.isConfigured) {
+      if (this.config.get<string>("app.env") === "production" || process.env.NODE_ENV === "production") {
+        throw new InternalServerErrorException("Email delivery is unavailable");
+      }
       this.logger.log(`[DEV MODE] Email to ${options.to}: ${options.subject}`);
       return;
     }
