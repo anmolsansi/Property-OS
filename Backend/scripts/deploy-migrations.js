@@ -1,123 +1,82 @@
+"use strict";
+
+// Render's Free plan does not support pre-deploy commands. This runs before
+// the NestJS process starts. Never auto-baseline a populated database.
 const { execFileSync } = require("node:child_process");
+const { readdirSync, existsSync } = require("node:fs");
+const path = require("node:path");
 const { PrismaClient } = require("@prisma/client");
 
+const appDir = path.resolve(__dirname, "..");
+const migrationsDir = path.join(appDir, "prisma", "migrations");
 const prisma = new PrismaClient();
 
-const BASELINE_MIGRATIONS = [
-  "20250101000000_add_soft_delete_and_indexes",
-  "20250601000000_add_multi_tenancy",
-  "20250624000000_add_login_2fa_otp_purpose",
-  "20250624000100_add_free_text_location_and_property_fields",
-];
-
-const CLERK_MIGRATION = "20250626000000_add_clerk_user_id";
-
 function runPrisma(args) {
-  execFileSync('./node_modules/.bin/prisma', ['migrate', 'deploy'], {
-    stdio: 'inherit',
+  execFileSync("npx", ["--no-install", "prisma", ...args], {
+    cwd: appDir,
+    stdio: "inherit",
+    env: process.env,
   });
 }
 
-async function getMigrationRowCount() {
-  const table = await prisma.$queryRaw`
-    SELECT EXISTS (
-      SELECT 1
-      FROM information_schema.tables
-      WHERE table_schema = 'public'
-        AND table_name = '_prisma_migrations'
-    ) AS exists
+async function databaseState() {
+  const [row] = await prisma.$queryRaw`
+    SELECT
+      EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = '_prisma_migrations'
+      ) AS has_migrations,
+      (
+        SELECT COUNT(*)::int FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_type = 'BASE TABLE'
+          AND table_name <> '_prisma_migrations'
+      ) AS table_count
   `;
-
-  if (!table[0]?.exists) return 0;
-
-  const rows = await prisma.$queryRaw`
-    SELECT COUNT(*)::int AS count
-    FROM "_prisma_migrations"
-  `;
-
-  return rows[0]?.count ?? 0;
-}
-
-async function getUserTableCount() {
-  const rows = await prisma.$queryRaw`
-    SELECT COUNT(*)::int AS count
-    FROM information_schema.tables
-    WHERE table_schema = 'public'
-      AND table_type = 'BASE TABLE'
-      AND table_name != '_prisma_migrations'
-  `;
-
-  return rows[0]?.count ?? 0;
-}
-
-async function hasClerkUserIdColumn() {
-  const rows = await prisma.$queryRaw`
-    SELECT EXISTS (
-      SELECT 1
-      FROM information_schema.columns
-      WHERE table_schema = 'public'
-        AND table_name = 'users'
-        AND column_name = 'clerk_user_id'
-    ) AS exists
-  `;
-
-  return Boolean(rows[0]?.exists);
-}
-
-async function baselineExistingSchemaIfNeeded() {
-  const migrationRowCount = await getMigrationRowCount();
-  const userTableCount = await getUserTableCount();
-
-  if (migrationRowCount > 0 || userTableCount === 0) return;
-
-  console.log(
-    "Detected existing database schema without Prisma migration history. Baselining existing migrations...",
-  );
-
-  for (const migration of BASELINE_MIGRATIONS) {
-    runPrisma(["migrate", "resolve", "--applied", migration]);
-  }
-
-  if (await hasClerkUserIdColumn()) {
-    runPrisma(["migrate", "resolve", "--applied", CLERK_MIGRATION]);
-  }
-}
-
-async function killZombieLocks() {
-  console.log("Checking for stale Prisma advisory locks...");
-  try {
-    const locks = await prisma.$queryRaw`
-      SELECT pid 
-      FROM pg_locks 
-      WHERE locktype = 'advisory' 
-        AND objid = 72707369
-        AND granted = true;
-    `;
-    
-    if (locks && locks.length > 0) {
-      console.log(`Found ${locks.length} stale lock(s). Terminating holding connections...`);
-      for (const lock of locks) {
-        await prisma.$executeRawUnsafe(`SELECT pg_terminate_backend($1::int)`, Number(lock.pid));
-        console.log(`Terminated PID ${lock.pid}`);
-      }
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    } else {
-      console.log("No stale locks found.");
-    }
-  } catch (err) {
-    console.error("Could not clear locks (safe to ignore):", err.message);
-  }
+  return row;
 }
 
 async function main() {
-  await baselineExistingSchemaIfNeeded();
-  await killZombieLocks();
+  const state = await databaseState();
+
+  if (!state.has_migrations && state.table_count === 0) {
+    console.log("Empty Postgres database detected. Preparing a demo baseline.");
+    // The repository's first checked-in migration alters pre-existing tables.
+    // It cannot run directly against a fresh database. db push creates the
+    // current complete schema without dropping data, because the DB is empty.
+    runPrisma(["db", "push", "--skip-generate"]);
+
+    if (!existsSync(migrationsDir)) {
+      throw new Error("Prisma migration directory is missing");
+    }
+
+    const migrations = readdirSync(migrationsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .filter((name) => existsSync(path.join(migrationsDir, name, "migration.sql")))
+      .sort();
+
+    if (migrations.length === 0) {
+      throw new Error("No Prisma migrations found. Refusing to baseline.");
+    }
+
+    for (const migration of migrations) {
+      runPrisma(["migrate", "resolve", "--applied", migration]);
+    }
+  } else if (!state.has_migrations) {
+    throw new Error(
+      "Existing tables have no Prisma migration history. Refusing to modify " +
+      "a populated database. Review and baseline it manually."
+    );
+  }
+
+  // For an already tracked database, apply only pending checked-in migrations.
   runPrisma(["migrate", "deploy"]);
 }
 
 main()
   .catch((error) => {
-    console.error(error);
+    console.error("Database preparation failed:", error.message);
     process.exitCode = 1;
   })
   .finally(async () => {

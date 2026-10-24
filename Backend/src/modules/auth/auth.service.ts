@@ -340,6 +340,9 @@ export class AuthService {
 
     const otp = await this.otpService.generate(user.id, "MOBILE_RECOVERY");
 
+    if (this.config.get<string>("app.env") === "production" || process.env.NODE_ENV === "production") {
+      throw new UnauthorizedException("Mobile recovery is not configured");
+    }
     this.logger.log(`[DEV MODE] Mobile OTP for ${mobileNumber}: ${otp}`);
 
     return {

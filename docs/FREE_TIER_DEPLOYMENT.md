@@ -1,206 +1,86 @@
-# Free-Tier Deployment Guide
+# PropertyOS $0 Deployment Guide (October 2026)
 
-This guide deploys PropertyOS with:
+This is a **personal demonstration / development** deployment, not a production hosting guarantee. Do not upload real client PII, contracts, or confidential property documents.
 
-- Frontend: Vercel
-- Backend: Render
-- Database: Neon Postgres
-- Media storage: Cloudflare R2
-- OTP email: Gmail SMTP first, Resend later after domain verification
+## Intended free stack
 
-This setup is good for staging, demos, and very small internal usage. For dependable production, upgrade the backend first because free web services can sleep and cold start.
+| Area | Service | Constraints |
+|---|---|---|
+| Next.js frontend | Vercel Hobby | Free for personal, **non-commercial** use only |
+| NestJS backend | Render Free web service | Sleeps after 15 minutes idle, 750 shared free instance hours/month; no pre-deploy command |
+| PostgreSQL | Neon Free | 1 GB per project as of October 2, 2026; quota suspends rather than charging on Free |
+| Authentication | Clerk Hobby | Free limit applies, no credit card required |
+| Media | Optional Cloudflare R2 | 10 GB-month free, **usage-based charges beyond free allowance**; avoid if absolute zero-charge is required |
+| Email | Clerk sign-in email; optional Resend HTTPS | SMTP ports 25/465/587 are blocked on Render Free |
 
-## Repository layout
+**Strictly no-charge configuration:** do not enable paid plans, add-ons, metered external APIs, Cloudflare R2 billing, Google Maps billing, or purchases. Storage and optional backend email features will not work without additional configuration. A business-facing commercial frontend must move off Vercel Hobby onto hosting whose terms allow the use.
 
-```text
-Property-OS/
-├── Backend/      # NestJS API, Prisma, PostgreSQL, S3-compatible media
-├── Frontend/     # Next.js app
-├── docs/
-└── render.yaml   # Render backend blueprint
-```
+## 1. Create the database
 
-## 1. Create Neon Postgres
+1. Sign up at https://neon.com and select **Free**.
+2. Create a fresh empty PostgreSQL project in the region closest to the backend (Singapore if available).
+3. In Neon, copy the **direct** database connection URL. Set **DATABASE_URL** only in Render's private environment settings, not in GitHub.
+4. On first backend startup only, the repository's `Backend/scripts/deploy-migrations.js` detects an *empty* database, creates the current Prisma schema using `prisma db push`, marks the checked-in legacy migrations as already applied, and runs `prisma migrate deploy`. Existing tracked databases receive only pending migrations. A populated untracked database is intentionally rejected.
 
-1. Create a Neon project.
-2. Create a database for PropertyOS.
-3. Copy the connection string.
-4. Use this shape for Render:
+This empty-database baseline is a **demo compatibility workaround**. The first checked-in migration assumes tables already exist. Before production use, establish a reviewed initial migration and tested backup/restore process.
 
-```env
-DATABASE_URL=postgresql://USER:PASSWORD@HOST.neon.tech/DB?sslmode=require&connect_timeout=15
-```
+## 2. Create Clerk authentication
 
-For this free-tier Render setup, use the direct Neon connection string first. When you add Prisma migrations and higher traffic later, keep `DATABASE_URL` for the app and add `DIRECT_URL` for Prisma migrations.
+1. Create a Clerk Hobby application at https://dashboard.clerk.com.
+2. Enable email/password or email code authentication.
+3. Copy the publishable and secret keys **to the relevant hosting provider's secret environment settings**. Never paste them into source control.
+4. Once the frontend URL exists, add its origin to Clerk's allowed origins/redirect configuration.
 
-## 2. Create Cloudflare R2 storage
+## 3. Deploy backend on Render Free
 
-1. Create an R2 bucket named `propertyos-media`.
-2. Create an R2 API token with read/write access to that bucket.
-3. Copy the account ID, access key ID, and secret access key.
-4. Set these backend env vars:
+1. In https://dashboard.render.com select **New → Blueprint** and connect `anmolsansi/Property-OS`.
+2. Review that the blueprint creates **one web service, plan Free**, in Singapore. **Do not approve any paid resource**.
+3. Set required variables privately: `DATABASE_URL`, `CLERK_SECRET_KEY`, `CLERK_AUTHORIZED_PARTIES`, `APP_FRONTEND_URL`, `CORS_ORIGIN`. The blueprint generates JWT and encryption secrets.
+4. Leave Redis disabled. Do **not** set Gmail SMTP credentials, because Render Free blocks SMTP ports.
+5. Do not configure `S3_ENDPOINT` or R2 credentials until you intentionally enable media storage.
+6. The free blueprint builds from the **monorepo root** with the root npm lockfile. It runs the schema preparation in the startup command because Render pre-deploy commands require a paid web service.
+7. Copy the actual Render API URL. Replace any sample `propertyos-api.onrender.com` URL if Render assigns a different hostname, and set `APP_URL` accordingly.
 
-```env
-S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
-S3_BUCKET=propertyos-media
-S3_ACCESS_KEY=<r2-access-key-id>
-S3_SECRET_KEY=<r2-secret-access-key>
-S3_REGION=auto
-S3_PUBLIC_URL=https://your-public-r2-domain-or-worker-url
-```
+If the first build fails, inspect Render logs. Do not create additional paid instances to troubleshoot.
 
-Use an R2 public bucket URL, custom domain, or Worker URL for `S3_PUBLIC_URL`. The API still uses signed URLs for upload and download, but this public URL is useful when listing already uploaded media.
+## 4. Deploy frontend on Vercel Hobby, personal demo only
 
-## 3. Deploy backend on Render
+1. At https://vercel.com/new import `anmolsansi/Property-OS` to a **Hobby** team.
+2. Set **Root Directory** = `Frontend` and Framework = Next.js.
+3. Under **Environment Variables**, set:
+   - `NEXT_PUBLIC_API_URL=https://YOUR-RENDER-HOST/api/v1`
+   - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` from Clerk
+   - `CLERK_SECRET_KEY` from Clerk
+   - `NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in`
+   - `NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up`
+   - `NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/dashboard`
+   - `NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/dashboard`
+4. Do not enable any paid add-ons. Deploy and copy the real `.vercel.app` URL.
+5. Update Render `APP_FRONTEND_URL`, `CORS_ORIGIN`, and `CLERK_AUTHORIZED_PARTIES` to that exact frontend origin. Redeploy Render after changing environment settings.
 
-The repo now includes `render.yaml` at the root. It creates one Render web service from the `Backend` folder.
+Vercel Hobby's terms restrict commercial use. For a real business deployment, replace this frontend step with an approved free hosting option, which may require Next.js code adaptations.
 
-### Option A: Blueprint deployment
+## 5. Seeding and safety
 
-1. Open Render.
-2. New > Blueprint.
-3. Select this GitHub repo.
-4. Render will detect `render.yaml`.
-5. Fill the prompted secret values.
+**Do not run `npm run db:seed` on a public database.** The existing seed file creates example accounts with hardcoded known passwords. It must be redesigned to seed reference data without insecure demo accounts before use on a public app.
 
-Required values:
+When no backend email delivery is configured, legacy backend OTP/email operations fail closed in production instead of logging OTP secrets and pretending email was sent. Clerk's own sign-in flows can still send email according to its plan.
 
-```env
-DATABASE_URL=postgresql://...
-APP_FRONTEND_URL=https://your-vercel-app.vercel.app
-CORS_ORIGIN=https://your-vercel-app.vercel.app
-S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
-S3_ACCESS_KEY=...
-S3_SECRET_KEY=...
-S3_PUBLIC_URL=https://your-public-r2-domain-or-worker-url
-SMTP_USER=yourapp.notifications@gmail.com
-SMTP_PASS=your-google-app-password
-SMTP_FROM=yourapp.notifications@gmail.com
-MASTER_ADMIN_EMAIL=admin@yourdomain.com
-MASTER_ADMIN_PASSWORD=change-this-before-seeding
-```
+A scheduled GitHub Actions keep-alive ping was disabled so Render Free can sleep naturally and won't consume continuous instance time.
 
-Leave Resend values blank until you have a verified sending domain.
+## 6. Verify
 
-### Option B: Manual Render service
+- Open `https://YOUR-RENDER-HOST/` and `https://YOUR-RENDER-HOST/api/v1/health`.
+- Open `https://YOUR-VERCEL-SITE.vercel.app`, sign in using Clerk, and inspect network requests to the correct API URL.
+- Verify CORS, unauthenticated request rejection, database reads/writes with throwaway demo records, and that no secret appears in browser responses or logs.
+- Only after separate review, test media upload and notifications if their service providers are configured.
 
-Use these settings:
+## Costs and constraints
 
-| Setting | Value |
-|---|---|
-| Runtime | Node |
-| Root Directory | `Backend` |
-| Build Command | `npm ci --legacy-peer-deps && npx prisma generate && npm run build` |
-| Pre-Deploy Command | `npx prisma db push` |
-| Start Command | `npm run start:prod` |
-| Health Check Path | `/api/v1/health` |
-| Region | Singapore |
-| Plan | Free for staging, Starter or higher for production |
+- **Render**: Free web service sleeps after 15 minutes without inbound traffic and has a 750-hour monthly workspace allowance. External transfer or paid-feature usage can have billing implications; review dashboard billing controls.
+- **Neon**: Free database has limited monthly compute and network transfer and 1 GB storage as of October 2026.
+- **R2**: Standard storage has a free monthly allowance, but an R2 subscription and metered billing beyond that allowance. Exclude R2 for a strict no-charge requirement.
+- **Vercel**: Hobby is free only for personal, non-commercial use.
+- **Clerk**: Hobby free plan supports email sign-in and has usage limits.
 
-Set all env vars from `Backend/.env.render.example`.
-
-### Required runtime env vars
-
-If Render starts the container and exits with:
-
-```text
-Invalid environment variables:
-{
-  DATABASE_URL: [ 'Invalid url' ],
-  JWT_ACCESS_SECRET: [ 'Required' ],
-  JWT_REFRESH_SECRET: [ 'Required' ]
-}
-```
-
-the image built correctly, but the service is missing required runtime secrets.
-Add these in Render > Service > Environment:
-
-```env
-DATABASE_URL=postgresql://USER:PASSWORD@HOST.neon.tech/DB?sslmode=require&connect_timeout=15
-JWT_ACCESS_SECRET=<long-random-secret-at-least-16-chars>
-JWT_REFRESH_SECRET=<different-long-random-secret-at-least-16-chars>
-```
-
-Generate secrets locally with:
-
-```bash
-openssl rand -hex 32
-```
-
-## 4. Deploy frontend on Vercel
-
-1. Import the same GitHub repo into Vercel.
-2. Set Root Directory to `Frontend`.
-3. Keep Framework Preset as Next.js.
-4. Add the frontend env vars:
-
-```env
-NEXT_PUBLIC_API_URL=https://propertyos-api.onrender.com/api/v1
-NEXT_PUBLIC_GOOGLE_MAPS_KEY=
-AUTH_SECRET=generate-a-long-random-value
-AUTH_URL=https://your-vercel-app.vercel.app
-```
-
-After Vercel gives you the final frontend URL, update the Render backend env vars:
-
-```env
-APP_FRONTEND_URL=https://your-vercel-app.vercel.app
-CORS_ORIGIN=https://your-vercel-app.vercel.app
-```
-
-Then redeploy the Render backend.
-
-## 5. Seed the database once
-
-The backend currently has a seed script that creates reference data, sample users, sample buildings, sample clients, tasks, deals, and site visits.
-
-Run it once after the backend deploys and the database schema exists:
-
-```bash
-cd Backend
-npm ci --legacy-peer-deps
-npx prisma generate
-export DATABASE_URL="postgresql://USER:PASSWORD@HOST.neon.tech/DB?sslmode=require&connect_timeout=15"
-export MASTER_ADMIN_EMAIL="admin@yourdomain.com"
-export MASTER_ADMIN_PASSWORD="change-this-password"
-npm run db:seed
-```
-
-Do not leave default demo credentials active in a real production database.
-
-## 6. Smoke tests
-
-After both apps are deployed, test these URLs:
-
-```text
-https://propertyos-api.onrender.com/
-https://propertyos-api.onrender.com/api/v1/health
-https://your-vercel-app.vercel.app
-```
-
-Expected backend root response:
-
-```json
-{
-  "name": "PropertyOS API",
-  "status": "ok"
-}
-```
-
-If frontend calls fail, check these first:
-
-1. `NEXT_PUBLIC_API_URL` in Vercel must end with `/api/v1`.
-2. `CORS_ORIGIN` in Render must exactly match the Vercel URL.
-3. Render backend must be awake. Free instances can sleep.
-4. Neon may take a few seconds to wake after inactivity.
-5. R2 bucket credentials must have read and write access.
-
-## 7. Production upgrade path
-
-Use the free stack for demos first, then upgrade in this order:
-
-1. Render backend paid instance, to avoid sleep and reduce cold starts.
-2. Add proper Prisma migrations and replace `prisma db push` with `prisma migrate deploy`.
-3. Add Redis or Render Key Value when queue-backed notifications are turned on.
-4. Add a domain and move OTP email from Gmail SMTP to Resend.
-5. Add database backups, monitoring, and object lifecycle rules for R2.
+Official limits: https://render.com/docs/free | https://render.com/docs/deploys | https://vercel.com/docs/plans/hobby | https://neon.com/blog/neon-free-plan-1-gb-per-project | https://clerk.com/pricing | https://developers.cloudflare.com/r2/pricing/
