@@ -28,7 +28,7 @@ async function main() {
 
   const clerkId = process.env.BOOTSTRAP_ADMIN_CLERK_ID!.trim();
   const expectedEmail = process.env.BOOTSTRAP_ADMIN_EMAIL!.trim().toLowerCase();
-  const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
+  const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const account = await clerk.users.getUser(clerkId);
   const email = account.emailAddresses.find(
     (e) => e.id === account.primaryEmailAddressId,
