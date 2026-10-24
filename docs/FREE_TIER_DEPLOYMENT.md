@@ -60,7 +60,30 @@ If the first build fails, inspect Render logs. Do not create additional paid ins
 
 Vercel Hobby's terms restrict commercial use. For a real business deployment, replace this frontend step with an approved free hosting option, which may require Next.js code adaptations.
 
-## 5. Seeding and safety
+## 5. Provision first administrator securely
+
+After the backend has successfully initialized the **empty** database and after you have created a **verified** Clerk account, perform this **manual, one-time** step on your trusted computer:
+
+1. In the Clerk dashboard, open the exact administrator account and copy its `user_...` Clerk ID. Verify the email.
+2. Run the following command locally from `Backend/`, using environment variables provided via your shell or local untracked environment file. Never paste actual values into GitHub, screenshots or chat:
+
+```bash
+# From the repo root, after npm ci
+cd Backend
+AUTH_PROVIDER=clerk \
+ALLOW_ADMIN_BOOTSTRAP=yes \
+BOOTSTRAP_ADMIN_CLERK_ID="user_REPLACE_WITH_ID" \
+BOOTSTRAP_ADMIN_EMAIL="your-verified-email@example.com" \
+DATABASE_URL="postgresql://REPLACE_WITH_NEON_DIRECT_URL" \
+CLERK_SECRET_KEY="REPLACE_WITH_SECRET" \
+npm run auth:bootstrap-admin
+```
+
+The script looks up the exact Clerk ID, verifies the primary email, and refuses to run on any database already containing users. It creates one linked admin and an audit event, with a random inaccessible legacy password. **Do not rerun this script to recover or replace users.** All other users must be explicitly provisioned by an authorized administrator.
+
+The API guard now **requires a matching Clerk user ID**. It no longer links by email, automatically creates a privileged account, or reactivates an account at login. Existing installations with unlinked accounts require a separately reviewed identity-mapping migration before changing their auth code.
+
+## 6. Seeding and safety
 
 **Do not run `npm run db:seed` on a public database.** The existing seed file creates example accounts with hardcoded known passwords. It must be redesigned to seed reference data without insecure demo accounts before use on a public app.
 
@@ -68,14 +91,14 @@ When no backend email delivery is configured, legacy backend OTP/email operation
 
 A scheduled GitHub Actions keep-alive ping was disabled so Render Free can sleep naturally and won't consume continuous instance time.
 
-## 6. Verify
+## 7. Verify
 
 - Open `https://YOUR-RENDER-HOST/` and `https://YOUR-RENDER-HOST/api/v1/health`.
 - Open `https://YOUR-VERCEL-SITE.vercel.app`, sign in using Clerk, and inspect network requests to the correct API URL.
 - Verify CORS, unauthenticated request rejection, database reads/writes with throwaway demo records, and that no secret appears in browser responses or logs.
 - Only after separate review, test media upload and notifications if their service providers are configured.
 
-## Costs and constraints
+## 8. Costs and constraints
 
 - **Render**: Free web service sleeps after 15 minutes without inbound traffic and has a 750-hour monthly workspace allowance. External transfer or paid-feature usage can have billing implications; review dashboard billing controls.
 - **Neon**: Free database has limited monthly compute and network transfer and 1 GB storage as of October 2026.
