@@ -174,6 +174,8 @@ export default function PropertyIntakeDetailPage({ params }: { params: Promise<{
   const [saving, setSaving] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
 
+  // This editable form intentionally resynchronizes all draft fields when a new property loads.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!property) return;
     const loadedProfile = getPropertyProfile(property.additionalFields, property.commercialTerms);
@@ -193,6 +195,7 @@ export default function PropertyIntakeDetailPage({ params }: { params: Promise<{
     setPrimaryMediaId(mediaSelection.primaryMediaId);
     setPrimaryMediaSelectionSet(mediaSelection.isExplicit);
   }, [property]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const status = useMemo(
     () => statusFromProperty(property?.telecallerStatus, property?.additionalFields),
