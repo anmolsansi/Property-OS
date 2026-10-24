@@ -10,10 +10,10 @@ This is a **personal demonstration / development** deployment, not a production 
 | NestJS backend | Render Free web service | Sleeps after 15 minutes idle, 750 shared free instance hours/month; no pre-deploy command |
 | PostgreSQL | Neon Free | 1 GB per project as of October 2, 2026; quota suspends rather than charging on Free |
 | Authentication | Clerk Hobby | Free limit applies, no credit card required |
-| Media | Optional Cloudflare R2 | 10 GB-month free, **usage-based charges beyond free allowance**; avoid if absolute zero-charge is required |
+| Media | Neon Object Storage Free | 5 GB per project, S3-compatible, private buckets supported; subject to Free plan limits |
 | Email | Clerk sign-in email; optional Resend HTTPS | SMTP ports 25/465/587 are blocked on Render Free |
 
-**Strictly no-charge configuration:** do not enable paid plans, add-ons, metered external APIs, Cloudflare R2 billing, Google Maps billing, or purchases. Storage and optional backend email features will not work without additional configuration. A business-facing commercial frontend must move off Vercel Hobby onto hosting whose terms allow the use.
+**Strictly no-charge configuration:** do not enable paid plans, add-ons, metered external APIs, Cloudflare R2 billing, Google Maps billing, or purchases. Use Neon Object Storage Free for media, or leave file uploads disabled. Optional backend email features need a supported HTTPS mail provider. A business-facing commercial frontend must move off Vercel Hobby onto hosting whose terms allow the use.
 
 ## 1. Create the database
 
@@ -37,7 +37,7 @@ This empty-database baseline is a **demo compatibility workaround**. The first c
 2. Review that the blueprint creates **one web service, plan Free**, in Singapore. **Do not approve any paid resource**.
 3. Set required variables privately: `DATABASE_URL`, `CLERK_SECRET_KEY`, `CLERK_AUTHORIZED_PARTIES`, `APP_FRONTEND_URL`, `CORS_ORIGIN`. The blueprint generates JWT and encryption secrets.
 4. Leave Redis disabled. Do **not** set Gmail SMTP credentials, because Render Free blocks SMTP ports.
-5. Do not configure `S3_ENDPOINT` or R2 credentials until you intentionally enable media storage.
+5. For free private media storage, create a **private bucket** named `propertyos-media` using Neon Object Storage in the same Neon project. Obtain branch-specific S3-compatible endpoint and scoped storage read/write credentials from Neon. Set `S3_ENDPOINT`, `S3_BUCKET=propertyos-media`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, and `S3_REGION` in Render's private environment settings. Leave `S3_PUBLIC_URL` unset for confidential documents. If you aren't using media yet, leave S3 credentials unset.
 6. The free blueprint builds from the **monorepo root** with the root npm lockfile. It runs the schema preparation in the startup command because Render pre-deploy commands require a paid web service.
 7. Copy the actual Render API URL. Replace any sample `propertyos-api.onrender.com` URL if Render assigns a different hostname, and set `APP_URL` accordingly.
 
@@ -79,8 +79,9 @@ A scheduled GitHub Actions keep-alive ping was disabled so Render Free can sleep
 
 - **Render**: Free web service sleeps after 15 minutes without inbound traffic and has a 750-hour monthly workspace allowance. External transfer or paid-feature usage can have billing implications; review dashboard billing controls.
 - **Neon**: Free database has limited monthly compute and network transfer and 1 GB storage as of October 2026.
-- **R2**: Standard storage has a free monthly allowance, but an R2 subscription and metered billing beyond that allowance. Exclude R2 for a strict no-charge requirement.
+- **Neon Object Storage**: Free includes 5 GB of S3-compatible object storage per project as of October 2026. Treat the storage and shared network quotas as hard limits. Keep private documents in private buckets.
+- **Cloudflare R2**: Not required for this deployment. It requires an R2 subscription and may bill beyond the free allowance.
 - **Vercel**: Hobby is free only for personal, non-commercial use.
 - **Clerk**: Hobby free plan supports email sign-in and has usage limits.
 
-Official limits: https://render.com/docs/free | https://render.com/docs/deploys | https://vercel.com/docs/plans/hobby | https://neon.com/blog/neon-free-plan-1-gb-per-project | https://clerk.com/pricing | https://developers.cloudflare.com/r2/pricing/
+Official limits: https://render.com/docs/free | https://render.com/docs/deploys | https://vercel.com/docs/plans/hobby | https://neon.com/blog/neon-free-plan-1-gb-per-project | https://clerk.com/pricing | https://neon.com/docs/storage/get-started | https://developers.cloudflare.com/r2/pricing/
