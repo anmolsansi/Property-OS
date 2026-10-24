@@ -161,7 +161,7 @@ export class ProposalExportService {
         // Set a custom row height so images fit (100 is approx 133 pixels)
         worksheet.getRow(currentRowNum).height = 100;
 
-        let currentImageCol = validFields.length;
+        const currentImageCol = validFields.length;
         
         for (let i = 0; i < images.length; i++) {
           const imgUrl = images[i];
