@@ -28,7 +28,8 @@
     "db:studio": "prisma studio",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
-    "docker:logs": "docker-compose logs -f"
+    "docker:logs": "docker-compose logs -f",
+    "auth:bootstrap-admin": "ts-node scripts/bootstrap-admin.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1071.0",
